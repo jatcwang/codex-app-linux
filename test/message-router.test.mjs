@@ -173,3 +173,42 @@ test("MessageRouter answers experimental feature enablement writes locally", asy
 
   router.dispose();
 });
+
+test("MessageRouter provides browser-safe virtual fetch defaults", async () => {
+  const router = new MessageRouter({
+    appServer: null,
+    udsClient: null,
+    workerPath: null,
+    logger: createLogger()
+  });
+
+  const sent = [];
+  const ws = {
+    readyState: 1,
+    send(payload) {
+      sent.push(JSON.parse(payload));
+    }
+  };
+
+  await router._handleVirtualFetch(ws, "req-3", {
+    requestId: "req-3",
+    method: "POST",
+    url: "vscode://codex/local-custom-agents",
+    body: JSON.stringify({})
+  });
+
+  await router._handleVirtualFetch(ws, "req-4", {
+    requestId: "req-4",
+    method: "POST",
+    url: "vscode://codex/hotkey-window-hotkey-state",
+    body: JSON.stringify({})
+  });
+
+  assert.equal(JSON.parse(sent[0].payload.bodyJsonString).agents.length, 0);
+  assert.deepEqual(JSON.parse(sent[1].payload.bodyJsonString).state, {
+    supported: false,
+    configuredHotkey: null
+  });
+
+  router.dispose();
+});

@@ -686,10 +686,11 @@ class TerminalRegistry {
 }
 
 class GitWorkerBridge {
-  constructor({ workerPath, sendWorkerEvent, logger }) {
+  constructor({ workerPath, sendWorkerEvent, logger, sentryInitOptions }) {
     this.workerPath = workerPath;
     this.sendWorkerEvent = sendWorkerEvent;
     this.logger = logger;
+    this.sentryInitOptions = sentryInitOptions || {};
     this.worker = null;
     this.pendingByRequestId = new Map();
   }
@@ -758,7 +759,7 @@ class GitWorkerBridge {
     this.worker = new Worker(this.workerPath, {
       workerData: {
         workerId: "git",
-        sentryInitOptions: {},
+        sentryInitOptions: this.sentryInitOptions,
         maxLogLevel: "info",
         sentryRewriteFramesRoot: process.cwd()
       }
@@ -839,7 +840,10 @@ export class MessageRouter {
         }
         this.broadcastWorkerEvent(workerId, payload);
       },
-      logger: this.logger
+      logger: this.logger,
+      sentryInitOptions: {
+        appVersion: this.extensionInfo?.version || "0.0.0"
+      }
     });
 
     this._wireBackends();
@@ -1735,6 +1739,9 @@ export class MessageRouter {
         case "set-thread-pinned":
           payload = { ok: true };
           break;
+        case "local-custom-agents":
+          payload = { agents: [] };
+          break;
         case "extension-info":
           payload = this.extensionInfo;
           break;
@@ -1854,6 +1861,14 @@ export class MessageRouter {
           break;
         case "locale-info":
           payload = { ideLocale: null, systemLocale: null };
+          break;
+        case "hotkey-window-hotkey-state":
+          payload = {
+            state: {
+              supported: false,
+              configuredHotkey: null
+            }
+          };
           break;
         case "get-configuration":
           payload = { value: this._resolveConfigurationValue(params?.key) };
