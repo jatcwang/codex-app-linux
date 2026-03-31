@@ -28,6 +28,14 @@ export async function readInstalledPackage(packageRoot = defaultPackageRoot()) {
   };
 }
 
+export async function tryReadInstalledPackage(packageRoot = defaultPackageRoot()) {
+  try {
+    return await readInstalledPackage(packageRoot);
+  } catch {
+    return null;
+  }
+}
+
 export function isExecutable(candidate) {
   if (!candidate) {
     return false;
@@ -69,6 +77,14 @@ export function cacheDirForPackage({ env = process.env, packageName, packageVers
     path.join(os.homedir(), ".cache");
 
   return path.join(cacheRoot, packageName, packageVersion);
+}
+
+export function resolveCacheRoot(env = process.env) {
+  return (
+    env.CODEX_APP_LINUX_CACHE_DIR ||
+    env.XDG_CACHE_HOME ||
+    path.join(os.homedir(), ".cache")
+  );
 }
 
 export function resolveBundlePathsFromBinary(binaryPath) {
@@ -149,6 +165,56 @@ export async function resolveBinaryPath({
   }
 
   return binaryPath;
+}
+
+export async function findLatestCachedBinaryPath({
+  env = process.env,
+  packageNames = ["codex-app-linux"]
+} = {}) {
+  const cacheRoot = resolveCacheRoot(env);
+  const candidates = [];
+
+  for (const packageName of packageNames) {
+    const packageRoot = path.join(cacheRoot, packageName);
+    const versions = await fsp.readdir(packageRoot, { withFileTypes: true }).catch(() => []);
+
+    for (const versionEntry of versions) {
+      if (!versionEntry.isDirectory()) {
+        continue;
+      }
+
+      const linuxDir = path.join(packageRoot, versionEntry.name, "linux-unpacked");
+      const entries = await fsp.readdir(linuxDir, { withFileTypes: true }).catch(() => []);
+
+      for (const entry of entries) {
+        if (!entry.isFile()) {
+          continue;
+        }
+
+        if (!entry.name.startsWith("codex-app-linux")) {
+          continue;
+        }
+
+        const binaryPath = path.join(linuxDir, entry.name);
+        if (!isExecutable(binaryPath)) {
+          continue;
+        }
+
+        const stat = await fsp.stat(binaryPath).catch(() => null);
+        if (!stat) {
+          continue;
+        }
+
+        candidates.push({
+          binaryPath,
+          mtimeMs: stat.mtimeMs
+        });
+      }
+    }
+  }
+
+  candidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
+  return candidates[0]?.binaryPath || null;
 }
 
 export async function matchesChecksum(filePath, expected) {

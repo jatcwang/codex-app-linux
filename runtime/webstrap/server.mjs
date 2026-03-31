@@ -25,10 +25,12 @@ import { UdsIpcClient } from "./ipc-uds.mjs";
 import { MessageRouter } from "./message-router.mjs";
 import { createLogger, safeJsonParse, toErrorMessage } from "./util.mjs";
 import {
-  readInstalledPackage,
+  findLatestCachedBinaryPath,
+  isExecutable,
   resolveBinaryPath,
   resolveBundlePathsFromBinary,
-  resolveCodexCliPath
+  resolveCodexCliPath,
+  tryReadInstalledPackage
 } from "../lib/linux-desktop.mjs";
 
 const logger = createLogger("web-server");
@@ -114,15 +116,34 @@ async function main() {
   const runtimeMetadataPath = `${tokenResult.tokenFilePath}.runtime`;
   const sessionStore = new SessionStore({ ttlMs: 1000 * 60 * 60 * 12 });
   const auth = createAuthController({ token: tokenResult.token, sessionStore });
-  const packageData = config.codexAppPath ? null : await readInstalledPackage();
+  const packageData = config.codexAppPath ? null : await tryReadInstalledPackage();
 
-  const codexPaths = config.codexAppPath
-    ? resolveCodexAppPaths(config.codexAppPath)
-    : resolveBundlePathsFromBinary(
-        await resolveBinaryPath({
-          packageJson: packageData.packageJson
-        })
+  let codexPaths;
+
+  if (config.codexAppPath) {
+    codexPaths = resolveCodexAppPaths(config.codexAppPath);
+  } else if (packageData) {
+    codexPaths = resolveBundlePathsFromBinary(
+      await resolveBinaryPath({
+        packageJson: packageData.packageJson
+      })
+    );
+  } else if (isExecutable(process.env.CODEX_APP_LINUX_BINARY_PATH)) {
+    codexPaths = resolveBundlePathsFromBinary(process.env.CODEX_APP_LINUX_BINARY_PATH);
+  } else {
+    const cachedBinaryPath = await findLatestCachedBinaryPath();
+
+    if (!cachedBinaryPath) {
+      throw new Error(
+        "No packaged Codex Linux bundle found. Run `npx codex-app-linux` once to populate the cache, set CODEX_APP_LINUX_BINARY_PATH, or pass `--codex-app /path/to/linux-unpacked`."
       );
+    }
+
+    logger.warn("Using latest cached Linux bundle for repo-local web mode", {
+      binaryPath: cachedBinaryPath
+    });
+    codexPaths = resolveBundlePathsFromBinary(cachedBinaryPath);
+  }
 
   await ensureCodexAppExists(codexPaths);
   const build = await readBuildMetadata(codexPaths, {
