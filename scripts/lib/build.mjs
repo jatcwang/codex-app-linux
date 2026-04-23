@@ -15,6 +15,7 @@ import {
   projectRoot,
   releaseTagForVersion
 } from "./config.mjs";
+import { patchUpstreamApp } from "./upstream-patches.mjs";
 import { writeAurPackage } from "./aur.mjs";
 
 const skippedLinuxResourceNames = new Set([
@@ -61,6 +62,7 @@ export async function buildChannel({
     appAsarPath,
     paths.stageAppDir
   ]);
+  await patchUpstreamApp(paths.stageAppDir);
   await stagePackagedResources(appResourcesDir, paths.stageResourcesDir);
 
   const effectiveUpstream = await normalizeStagePackage(
