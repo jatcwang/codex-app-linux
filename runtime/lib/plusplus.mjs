@@ -53,6 +53,26 @@ export async function ensureCodexCompatibilitySymlink(appRoot, binaryPath) {
   return linkPath;
 }
 
+export async function patchCodexPlusPlusInstallerSource(sourceRoot) {
+  const replacements = [
+    {
+      path: path.join(sourceRoot, "packages", "installer", "src", "commands", "install.ts"),
+      signature: "function patchCodexWindowServices(appDir: string, originalMain: string): void"
+    },
+    {
+      path: path.join(sourceRoot, "packages", "installer", "dist", "commands", "install.js"),
+      signature: "function patchCodexWindowServices(appDir, originalMain)"
+    }
+  ];
+
+  let patched = false;
+  for (const replacement of replacements) {
+    patched = (await patchCodexWindowServicesFunction(replacement)) || patched;
+  }
+
+  return patched;
+}
+
 async function resolveElectronBinaryPath(binaryPath) {
   const resolved = path.resolve(binaryPath);
   const binaryName = path.basename(resolved);
@@ -66,6 +86,11 @@ async function resolveElectronBinaryPath(binaryPath) {
 }
 
 async function resolveCodexPlusPlusCommand({ env, bootstrap }) {
+  const sourceRoot = path.resolve(
+    env.CODEX_PLUSPLUS_SOURCE_DIR || path.join(os.homedir(), ".codex-plusplus", "source")
+  );
+  await patchCodexPlusPlusInstallerSource(sourceRoot);
+
   if (env.CODEX_PLUSPLUS_CLI) {
     const cliPath = path.resolve(env.CODEX_PLUSPLUS_CLI);
     if (fs.existsSync(cliPath)) {
@@ -80,9 +105,6 @@ async function resolveCodexPlusPlusCommand({ env, bootstrap }) {
     }
   }
 
-  const sourceRoot = path.resolve(
-    env.CODEX_PLUSPLUS_SOURCE_DIR || path.join(os.homedir(), ".codex-plusplus", "source")
-  );
   const sourceCli = path.join(sourceRoot, "packages", "installer", "dist", "cli.js");
 
   if (fs.existsSync(sourceCli)) {
@@ -94,12 +116,100 @@ async function resolveCodexPlusPlusCommand({ env, bootstrap }) {
   }
 
   await bootstrapCodexPlusPlusSource({ sourceRoot, env });
+  await patchCodexPlusPlusInstallerSource(sourceRoot);
 
   if (!fs.existsSync(sourceCli)) {
     throw new Error(`codex-plusplus bootstrap did not produce ${sourceCli}`);
   }
 
   return nodeCommand(sourceCli);
+}
+
+async function patchCodexWindowServicesFunction({ path: filePath, signature }) {
+  const source = await fsp.readFile(filePath, "utf8").catch(() => null);
+  if (!source) {
+    return false;
+  }
+  if (
+    source.includes("findCodexPlusPlusWindowServicesHook") &&
+    source.includes("(?:[,;]|\\\\blet\\\\s+)")
+  ) {
+    return false;
+  }
+
+  const start = source.indexOf(signature);
+  const nextFunction = source.indexOf("\nfunction findCodexMainCandidates", start);
+  if (start < 0 || nextFunction < 0) {
+    return false;
+  }
+
+  const replacement = `${signature} {
+  const marker = "__codexpp_window_services__";
+  const candidates = findCodexMainCandidates(appDir, originalMain);
+
+  for (const mainPath of candidates) {
+    const source = readFileSync(mainPath, "utf8");
+    if (source.includes(marker)) return;
+
+    const hook = findCodexPlusPlusWindowServicesHook(source);
+    if (!hook) continue;
+
+    const patched =
+      source.slice(0, hook.insertIndex) +
+      \`;globalThis.\${marker}=\${hook.serviceVar}\` +
+      source.slice(hook.insertIndex);
+    writeFileSync(mainPath, patched);
+    return;
+  }
+
+  throw new Error("Codex window services hook point not found");
+}
+
+function findCodexPlusPlusWindowServicesHook(source) {
+  const assignmentPattern = /(?:[,;]|\\blet\\s+)([$A-Za-z_][$A-Za-z0-9_]*)=[$A-Za-z_][$A-Za-z0-9_]*\\(\\{buildFlavor:/g;
+  for (let match = assignmentPattern.exec(source); match; match = assignmentPattern.exec(source)) {
+    const serviceVar = match[1];
+    const callIndex = match.index + match[0].indexOf(serviceVar);
+    const hostBindingsIndex = source.indexOf(\`\${serviceVar}.setHostBindings({\`, callIndex);
+    const windowServicesIndex = source.indexOf(\`windowServices:\${serviceVar}\`, hostBindingsIndex);
+    const insertIndex = source.indexOf("});", callIndex);
+
+    if (
+      hostBindingsIndex > callIndex &&
+      windowServicesIndex > hostBindingsIndex &&
+      insertIndex > callIndex &&
+      insertIndex < hostBindingsIndex
+    ) {
+      return { serviceVar, insertIndex: insertIndex + 2 };
+    }
+  }
+
+  const callNeedle = "=ww({buildFlavor:";
+  const callIndex = source.indexOf(callNeedle);
+  if (callIndex < 1) return null;
+
+  let nameStart = callIndex - 1;
+  while (nameStart > 0 && /[$A-Za-z0-9_]/.test(source[nameStart - 1] ?? "")) {
+    nameStart -= 1;
+  }
+  const serviceVar = source.slice(nameStart, callIndex);
+  if (!/^[$A-Za-z_][$A-Za-z0-9_]*$/.test(serviceVar)) {
+    throw new Error("Codex window services variable could not be identified");
+  }
+
+  const afterCallNeedle = "});jb({buildFlavor:";
+  const afterCallIndex = source.indexOf(afterCallNeedle, callIndex);
+  if (afterCallIndex < 0) {
+    throw new Error("Codex window services hook insertion point not found");
+  }
+
+  return { serviceVar, insertIndex: afterCallIndex + 2 };
+}
+
+`;
+
+  await fsp.writeFile(filePath, source.slice(0, start) + replacement + source.slice(nextFunction + 1));
+  return true;
 }
 
 async function bootstrapCodexPlusPlusSource({ sourceRoot, env }) {

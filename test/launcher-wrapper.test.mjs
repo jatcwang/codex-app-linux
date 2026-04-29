@@ -6,7 +6,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 import afterPack from "../scripts/electron-builder-after-pack.cjs";
-import { ensureCodexCompatibilitySymlink } from "../runtime/lib/plusplus.mjs";
+import {
+  ensureCodexCompatibilitySymlink,
+  patchCodexPlusPlusInstallerSource
+} from "../runtime/lib/plusplus.mjs";
 
 test("launcher wrapper resolves symlinked entrypoint to sibling binary", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-app-linux-wrapper-"));
@@ -369,4 +372,52 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(process.argv.slice(
     ["install", "--no-default-tweaks", "--app", appDir]
   );
   assert.equal(await fs.readlink(path.join(appDir, "codex")), "codex-app-linux-bin");
+});
+
+test("plusplus installer patch exposes current Codex window services shape", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-app-linux-plusplus-patch-"));
+  const sourceRoot = path.join(root, "source");
+  const commandsDir = path.join(sourceRoot, "packages", "installer", "dist", "commands");
+  const appDir = path.join(root, "app");
+  const mainPath = path.join(appDir, "main.js");
+  const installerPath = path.join(commandsDir, "install.js");
+
+  await fs.mkdir(commandsDir, { recursive: true });
+  await fs.mkdir(appDir, { recursive: true });
+  await fs.writeFile(path.join(sourceRoot, "package.json"), "{\"type\":\"module\"}\n");
+  await fs.writeFile(
+    installerPath,
+    `import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+export function patchCodexWindowServices(appDir, originalMain) {
+  const marker = "__codexpp_window_services__";
+  const candidates = findCodexMainCandidates(appDir, originalMain);
+
+  for (const mainPath of candidates) {
+    const source = readFileSync(mainPath, "utf8");
+    if (source.includes(marker)) return;
+    throw new Error("Codex window services hook point not found");
+  }
+}
+
+function findCodexMainCandidates(appDir, originalMain) {
+  return [resolve(appDir, originalMain)];
+}
+`
+  );
+  await fs.writeFile(
+    mainPath,
+    "let P=Cw({buildFlavor:a,allowDevtools:p});Ab({buildFlavor:a,getContextForWebContents:P.getContextForWebContents});P.setHostBindings({getContext:L.getWindowContextForHost});let R=Jb({buildFlavor:a,windowServices:P,ensureHostWindow:P.ensureHostWindow});\n"
+  );
+
+  assert.equal(await patchCodexPlusPlusInstallerSource(sourceRoot), true);
+
+  const installer = await import(`${installerPath}?cacheBust=${Date.now()}`);
+  installer.patchCodexWindowServices(appDir, "main.js");
+
+  assert.match(
+    await fs.readFile(mainPath, "utf8"),
+    /\}\);globalThis\.__codexpp_window_services__=P;Ab/
+  );
 });
