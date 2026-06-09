@@ -54,7 +54,18 @@ test("writeAurPackage emits PKGBUILD, .SRCINFO, and install script", async () =>
   );
   assert.match(pkgbuild, /Exec=codex-app-linux %U/);
   assert.match(pkgbuild, /linux-unpacked/);
+  assert.match(
+    pkgbuild,
+    /'codex-app-linux-26\.313\.41514-launcher\.1-x64-linux-unpacked\.tar\.gz'/
+  );
+  assert.doesNotMatch(pkgbuild, /::https:\/\/github\.com/);
+  assert.doesNotMatch(pkgbuild, /AppImage/);
   assert.match(srcinfo, /pkgbase = codex-app-unofficial/);
+  assert.match(
+    srcinfo,
+    /source = codex-app-linux-26\.313\.41514-launcher\.1-x64-linux-unpacked\.tar\.gz/
+  );
+  assert.doesNotMatch(srcinfo, /::https:\/\/github\.com/);
   assert.match(srcinfo, /provides = codex-app-linux-bin/);
   assert.match(srcinfo, /conflicts = codex-app-linux-bin/);
   assert.match(srcinfo, /replaces = codex-app-linux-bin/);

@@ -126,6 +126,8 @@ export async function buildChannel({
     iconSha256,
     targetDir: aurDir
   });
+  await fs.copyFile(unpackedTarballPath, path.join(aurDir, path.basename(unpackedTarballPath)));
+  await fs.copyFile(iconAssetPath, path.join(aurDir, path.basename(iconAssetPath)));
 
   const packageDir = await assembleNpmPackage({
     channel,

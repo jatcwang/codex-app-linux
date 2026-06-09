@@ -19,9 +19,6 @@ export async function writeAurPackage({
   const desktopId = executableName;
   const pkgver = archPkgverFor(packageVersion);
   const url = `https://github.com/${releaseRepo}`;
-  const releaseBaseUrl = `${url}/releases/download/${releaseTag}`;
-  const tarballSourceUrl = `${releaseBaseUrl}/${tarballAssetName}`;
-  const iconSourceUrl = `${releaseBaseUrl}/${iconAssetName}`;
   const pkgbuildPath = path.join(targetDir, "PKGBUILD");
   const srcinfoPath = path.join(targetDir, ".SRCINFO");
   const installPath = path.join(targetDir, `${pkgname}.install`);
@@ -48,10 +45,8 @@ export async function writeAurPackage({
     appDirName,
     desktopId,
     tarballAssetName,
-    tarballSourceUrl,
     tarballSha256,
     iconAssetName,
-    iconSourceUrl,
     iconSha256
   });
   const srcinfo = renderSrcinfo({
@@ -61,10 +56,8 @@ export async function writeAurPackage({
     pkgver,
     url,
     tarballAssetName,
-    tarballSourceUrl,
     tarballSha256,
     iconAssetName,
-    iconSourceUrl,
     iconSha256
   });
   const installScript = renderInstallScript({ appDirName, executableName, pkgname });
@@ -90,10 +83,8 @@ function renderPkgbuild({
   appDirName,
   desktopId,
   tarballAssetName,
-  tarballSourceUrl,
   tarballSha256,
   iconAssetName,
-  iconSourceUrl,
   iconSha256
 }) {
   const pkgdesc = aurPkgdesc(channel);
@@ -114,8 +105,8 @@ depends=('alsa-lib' 'gtk3' 'libnotify' 'libsecret' 'libxss' 'nss' 'xdg-utils')
 ${packageRelations}
 install=${shellQuote(`${pkgname}.install`)}
 source=(
-  ${shellQuote(`${tarballAssetName}::${tarballSourceUrl}`)}
-  ${shellQuote(`${iconAssetName}::${iconSourceUrl}`)}
+  ${shellQuote(tarballAssetName)}
+  ${shellQuote(iconAssetName)}
 )
 sha256sums=(
   ${shellQuote(tarballSha256)}
@@ -160,10 +151,8 @@ function renderSrcinfo({
   pkgver,
   url,
   tarballAssetName,
-  tarballSourceUrl,
   tarballSha256,
   iconAssetName,
-  iconSourceUrl,
   iconSha256
 }) {
   const pkgdesc = aurPkgdesc(channel);
@@ -189,8 +178,8 @@ function renderSrcinfo({
 \tdepends = nss
 \tdepends = xdg-utils
 ${packageRelations}\tinstall = ${pkgname}.install
-\tsource = ${tarballAssetName}::${tarballSourceUrl}
-\tsource = ${iconAssetName}::${iconSourceUrl}
+\tsource = ${tarballAssetName}
+\tsource = ${iconAssetName}
 \tsha256sums = ${tarballSha256}
 \tsha256sums = ${iconSha256}
 
